@@ -1,48 +1,54 @@
-
 --==================================================
--- DRAGON FPS BOOSTER V6 - CUSTOM EXTREME
+-- DRAGON FPS BOOSTER V7 - ULTIMATE CLIENT EDITION
 -- Mobile / Executor / 6 Presets / 8 Toggles
--- Client-side graphics optimization
+-- Incremental Update + Weak Cache + UI Sync
 --==================================================
 
 local Players = game:GetService("Players")
 local Lighting = game:GetService("Lighting")
 local Workspace = game:GetService("Workspace")
 local RunService = game:GetService("RunService")
-
-local Player = Players.LocalPlayer
 local CoreGui = game:GetService("CoreGui")
 
+local LocalPlayer = Players.LocalPlayer or Players.PlayerAdded:Wait()
+
 -- CLEAN OLD GUI
-for _, parent in ipairs({CoreGui, Player:WaitForChild("PlayerGui")}) do
-    pcall(function()
-        local old = parent:FindFirstChild("DragonFPS_V6")
-        if old then old:Destroy() end
-    end)
+for _, parent in ipairs({CoreGui, LocalPlayer:WaitForChild("PlayerGui")}) do
+    local old = parent:FindFirstChild("DragonFPS_V7")
+    if old then
+        old:Destroy()
+    end
+    local oldV6 = parent:FindFirstChild("DragonFPS_V6")
+    if oldV6 then
+        oldV6:Destroy()
+    end
 end
 
 --==================================================
--- STATE
+-- STATE & WEAK STORAGE
 --==================================================
 
 local Enabled = false
-local Level = 1
-local Saved = {}
+local ActiveLevel = 0
+local IsApplying = false
+local RunToken = 0
+
+-- Weak keys để tránh giữ tham chiếu Instance đã bị Destroy
+local Saved = setmetatable({}, {__mode = "k"})
 local OriginalQuality = nil
-local Applying = false
 
 local Features = {
-    Particles = true,
-    Trails = true,
-    PostFX = true,
-    Lighting = true,
-    Materials = true,
+    Particles = false,
+    Trails = false,
+    PostFX = false,
+    Lighting = false,
+    Materials = false,
     Textures = false,
     HideMap = false,
     Shadows = true
 }
 
-local FeatureNames = {
+local FeatureOrder = {
     "Particles",
     "Trails",
     "PostFX",
@@ -60,164 +66,219 @@ local FeatureLabels = {
     Lighting = "Dynamic Lighting",
     Materials = "Low Materials",
     Textures = "Remove Textures",
-    HideMap = "Hide Entire Map",
-    Shadows = "Shadow Removal"
+    HideMap = "Hide Map (Local)",
+    Shadows = "Disable Shadows"
 }
 
 --==================================================
--- SAVE / RESTORE
+-- SAFE PROPERTY HELPERS
 --==================================================
 
-local function Set(obj, prop, value)
-    if not obj then return end
-
-    if not Saved[obj] then
-        Saved[obj] = {}
+local function RememberAndSet(obj, prop, value)
+    if not obj or not obj.Parent then
+        return
     end
 
-    if Saved[obj][prop] == nil then
-        local ok, old = pcall(function()
+    local record = Saved[obj]
+    if not record then
+        record = {}
+        Saved[obj] = record
+    end
+
+    if record[prop] == nil then
+        local ok, currentVal = pcall(function()
             return obj[prop]
         end)
-
-        if not ok then return end
-        Saved[obj][prop] = old
+        if not ok then
+            return
+        end
+        record[prop] = currentVal
     end
 
-    pcall(function()
-        obj[prop] = value
-    end)
+    -- Gán trực tiếp cho tốc độ cao; chỉ dùng pcall khi cần
+    obj[prop] = value
 end
 
-local function RestoreProperties()
-    for obj, properties in pairs(Saved) do
-        for prop, old in pairs(properties) do
-            pcall(function()
-                obj[prop] = old
-            end)
+local function RestoreSingleFeature(featureName)
+    for obj, record in pairs(Saved) do
+        if typeof(obj) == "Instance" and obj.Parent then
+            if featureName == "Particles" then
+                if record.Enabled ~= nil and (obj:IsA("ParticleEmitter") or obj:IsA("Fire") or obj:IsA("Smoke") or obj:IsA("Sparkles")) then
+                    obj.Enabled = record.Enabled
+                    record.Enabled = nil
+                end
+            elseif featureName == "Trails" then
+                if record.Enabled ~= nil and (obj:IsA("Trail") or obj:IsA("Beam")) then
+                    obj.Enabled = record.Enabled
+                    record.Enabled = nil
+                end
+            elseif featureName == "PostFX" then
+                if record.Enabled ~= nil and obj:IsA("PostEffect") then
+                    obj.Enabled = record.Enabled
+                    record.Enabled = nil
+                end
+                if obj:IsA("Atmosphere") then
+                    if record.Density ~= nil then obj.Density = record.Density; record.Density = nil end
+                    if record.Haze ~= nil then obj.Haze = record.Haze; record.Haze = nil end
+                    if record.Glare ~= nil then obj.Glare = record.Glare; record.Glare = nil end
+                end
+            elseif featureName == "Lighting" then
+                if record.Enabled ~= nil and (obj:IsA("PointLight") or obj:IsA("SpotLight") or obj:IsA("SurfaceLight")) then
+                    obj.Enabled = record.Enabled
+                    record.Enabled = nil
+                end
+                if obj == Lighting then
+                    if record.EnvironmentDiffuseScale ~= nil then Lighting.EnvironmentDiffuseScale = record.EnvironmentDiffuseScale; record.EnvironmentDiffuseScale = nil end
+                    if record.EnvironmentSpecularScale ~= nil then Lighting.EnvironmentSpecularScale = record.EnvironmentSpecularScale; record.EnvironmentSpecularScale = nil end
+                end
+            elseif featureName == "Materials" and obj:IsA("BasePart") then
+                if record.Material ~= nil then obj.Material = record.Material; record.Material = nil end
+                if record.Reflectance ~= nil then obj.Reflectance = record.Reflectance; record.Reflectance = nil end
+            elseif featureName == "Textures" and (obj:IsA("Decal") or obj:IsA("Texture")) then
+                if record.Transparency ~= nil then obj.Transparency = record.Transparency; record.Transparency = nil end
+            elseif featureName == "HideMap" then
+                if obj:IsA("BasePart") and record.LocalTransparencyModifier ~= nil then
+                    obj.LocalTransparencyModifier = record.LocalTransparencyModifier
+                    record.LocalTransparencyModifier = nil
+                end
+                if obj:IsA("Terrain") and record.Decoration ~= nil then
+                    obj.Decoration = record.Decoration
+                    record.Decoration = nil
+                end
+            elseif featureName == "Shadows" then
+                if obj:IsA("BasePart") and record.CastShadow ~= nil then
+                    obj.CastShadow = record.CastShadow
+                    record.CastShadow = nil
+                end
+                if obj == Lighting and record.GlobalShadows ~= nil then
+                    Lighting.GlobalShadows = record.GlobalShadows
+                    record.GlobalShadows = nil
+                end
+            end
         end
     end
-
-    Saved = {}
 end
 
 local function RestoreAll()
+    RunToken += 1
     Enabled = false
-    RestoreProperties()
+    ActiveLevel = 0
+
+    for obj, record in pairs(Saved) do
+        if typeof(obj) == "Instance" and obj.Parent then
+            for prop, oldVal in pairs(record) do
+                pcall(function()
+                    obj[prop] = oldVal
+                end)
+            end
+        end
+    end
+
+    table.clear(Saved)
 
     if OriginalQuality ~= nil then
         pcall(function()
             settings().Rendering.QualityLevel = OriginalQuality
         end)
-
         OriginalQuality = nil
     end
 end
 
 --==================================================
--- PROTECTION
+-- CHARACTER & TOOL PROTECTION
 --==================================================
 
 local function IsProtected(obj)
-    local current = obj
-
+    local current = obj.Parent
     while current and current ~= Workspace do
-        if current:IsA("Model") then
-            if current:FindFirstChildOfClass("Humanoid") then
-                return true
-            end
-        end
-
         if current:IsA("Tool") then
             return true
         end
-
+        if current:IsA("Model") and current:FindFirstChildOfClass("Humanoid") then
+            return true
+        end
         current = current.Parent
     end
-
     return false
 end
 
 --==================================================
--- OPTIMIZATION ENGINE
+-- CORE OPTIMIZER ENGINE
 --==================================================
 
-local function OptimizeObject(obj)
-    if not Enabled or IsProtected(obj) then
+local function OptimizeInstance(obj, targetFeature)
+    if not Enabled or not obj or not obj.Parent then
+        return
+    end
+    if IsProtected(obj) then
         return
     end
 
-    -- 1. PARTICLES
-    if Features.Particles then
-        if obj:IsA("ParticleEmitter")
-        or obj:IsA("Fire")
-        or obj:IsA("Smoke")
-        or obj:IsA("Sparkles") then
-            Set(obj, "Enabled", false)
+    local checkAll = (targetFeature == nil)
+
+    if (checkAll or targetFeature == "Particles") and Features.Particles then
+        if obj:IsA("ParticleEmitter") or obj:IsA("Fire") or obj:IsA("Smoke") or obj:IsA("Sparkles") then
+            RememberAndSet(obj, "Enabled", false)
         end
     end
 
-    -- 2. TRAILS
-    if Features.Trails then
+    if (checkAll or targetFeature == "Trails") and Features.Trails then
         if obj:IsA("Trail") or obj:IsA("Beam") then
-            Set(obj, "Enabled", false)
+            RememberAndSet(obj, "Enabled", false)
         end
     end
 
-    -- 3. POST FX
-    if Features.PostFX then
+    if (checkAll or targetFeature == "PostFX") and Features.PostFX then
         if obj:IsA("PostEffect") then
-            Set(obj, "Enabled", false)
-        end
-
-        if obj:IsA("Atmosphere") then
-            Set(obj, "Density", 0)
-            Set(obj, "Haze", 0)
-            Set(obj, "Glare", 0)
+            RememberAndSet(obj, "Enabled", false)
+        elseif obj:IsA("Atmosphere") then
+            RememberAndSet(obj, "Density", 0)
+            RememberAndSet(obj, "Haze", 0)
+            RememberAndSet(obj, "Glare", 0)
         end
     end
 
-    -- 4. LIGHTING
-    if Features.Lighting then
-        if obj:IsA("PointLight")
-        or obj:IsA("SpotLight")
-        or obj:IsA("SurfaceLight") then
-            Set(obj, "Enabled", false)
+    if (checkAll or targetFeature == "Lighting") and Features.Lighting then
+        if obj:IsA("PointLight") or obj:IsA("SpotLight") or obj:IsA("SurfaceLight") then
+            RememberAndSet(obj, "Enabled", false)
         end
     end
 
-    -- 5. MATERIALS
-    if Features.Materials and obj:IsA("BasePart") then
-        Set(obj, "Material", Enum.Material.SmoothPlastic)
-        Set(obj, "Reflectance", 0)
-    end
+    if obj:IsA("BasePart") then
+        if (checkAll or targetFeature == "Materials") and Features.Materials then
+            RememberAndSet(obj, "Material", Enum.Material.SmoothPlastic)
+            RememberAndSet(obj, "Reflectance", 0)
+        end
 
-    -- 6. TEXTURES
-    if Features.Textures then
+        if (checkAll or targetFeature == "HideMap") and Features.HideMap then
+            RememberAndSet(obj, "LocalTransparencyModifier", 1)
+        end
+
+        if (checkAll or targetFeature == "Shadows") and Features.Shadows then
+            RememberAndSet(obj, "CastShadow", false)
+        end
+    elseif (checkAll or targetFeature == "Textures") and Features.Textures then
         if obj:IsA("Decal") or obj:IsA("Texture") then
-            Set(obj, "Transparency", 1)
+            RememberAndSet(obj, "Transparency", 1)
         end
-    end
-
-    -- 7. HIDE MAP
-    if Features.HideMap and obj:IsA("BasePart") then
-        Set(obj, "LocalTransparencyModifier", 1)
-    end
-
-    -- 8. SHADOWS
-    if Features.Shadows and obj:IsA("BasePart") then
-        Set(obj, "CastShadow", false)
+    elseif (checkAll or targetFeature == "HideMap") and Features.HideMap and obj:IsA("Terrain") then
+        RememberAndSet(obj, "Decoration", false)
     end
 end
 
-local function ApplyGlobal()
+local function ApplyGlobalSettings()
     if Features.Shadows then
-        Set(Lighting, "GlobalShadows", false)
+        RememberAndSet(Lighting, "GlobalShadows", false)
     end
 
     if Features.Lighting then
-        Set(Lighting, "EnvironmentDiffuseScale", 0)
-        Set(Lighting, "EnvironmentSpecularScale", 0)
+        RememberAndSet(Lighting, "EnvironmentDiffuseScale", 0)
+        RememberAndSet(Lighting, "EnvironmentSpecularScale", 0)
+    end
+
+    local terrain = Workspace:FindFirstChildOfClass("Terrain")
+    if terrain and Features.HideMap then
+        RememberAndSet(terrain, "Decoration", false)
     end
 
     if OriginalQuality == nil then
@@ -227,79 +288,88 @@ local function ApplyGlobal()
     end
 
     pcall(function()
-        settings().Rendering.QualityLevel =
-            Enum.QualityLevel.Level01
+        settings().Rendering.QualityLevel = Enum.QualityLevel.Level01
     end)
-
-    local terrain = Workspace:FindFirstChildOfClass("Terrain")
-
-    if terrain and Features.HideMap then
-        Set(terrain, "Decoration", false)
-    end
 end
 
-local function ApplyAll()
-    if Applying then return end
-    Applying = true
+local function ScanDescendantsAsync(targetFeature, token)
+    local descendants = Workspace:GetDescendants()
+    local batchSize = 1800
 
-    RestoreProperties()
+    for i = 1, #descendants do
+        if not Enabled or token ~= RunToken then
+            return
+        end
 
-    Enabled = true
+        OptimizeInstance(descendants[i], targetFeature)
 
-    ApplyGlobal()
-
-    for _, obj in ipairs(Workspace:GetDescendants()) do
-        OptimizeObject(obj)
+        if i % batchSize == 0 then
+            task.wait()
+        end
     end
 
     for _, obj in ipairs(Lighting:GetDescendants()) do
-        OptimizeObject(obj)
+        if not Enabled or token ~= RunToken then
+            return
+        end
+        OptimizeInstance(obj, targetFeature)
+    end
+end
+
+local function ApplyBoost(targetFeature)
+    if IsApplying then return end
+    IsApplying = true
+
+    RunToken += 1
+    local token = RunToken
+    Enabled = true
+
+    ApplyGlobalSettings()
+    task.spawn(function()
+        ScanDescendantsAsync(targetFeature, token)
+        IsApplying = false
+    end)
+end
+
+local function ToggleFeature(name)
+    Features[name] = not Features[name]
+    ActiveLevel = 0
+
+    if not Enabled then
+        return
     end
 
-    Applying = false
+    if Features[name] then
+        ApplyBoost(name)
+    else
+        RestoreSingleFeature(name)
+    end
 end
 
 --==================================================
--- NEW OBJECTS
+-- REALTIME NEW OBJECT HANDLER
 --==================================================
 
-Workspace.DescendantAdded:Connect(function(obj)
-    if Enabled then
+local function HookContainer(container)
+    return container.DescendantAdded:Connect(function(obj)
+        if not Enabled then return end
         task.defer(function()
             if Enabled and obj.Parent then
-                OptimizeObject(obj)
+                OptimizeInstance(obj, nil)
             end
         end)
-    end
-end)
+    end)
+end
 
-Lighting.DescendantAdded:Connect(function(obj)
-    if Enabled then
-        task.defer(function()
-            if Enabled and obj.Parent then
-                OptimizeObject(obj)
-            end
-        end)
-    end
-end)
+local connWorkspace = HookContainer(Workspace)
+local connLighting = HookContainer(Lighting)
 
 --==================================================
--- PRESETS
+-- 6 PRESETS (TĂNG DẦN ĐỘ TỐI ƯU)
 --==================================================
 
 local Presets = {
-    [1] = {
-        Particles = false,
-        Trails = false,
-        PostFX = false,
-        Lighting = false,
-        Materials = false,
-        Textures = false,
-        HideMap = false,
-        Shadows = true
-    },
-
-    [2] = {
+    [1] = { -- Smooth Basic
         Particles = true,
         Trails = false,
         PostFX = false,
@@ -309,8 +379,7 @@ local Presets = {
         HideMap = false,
         Shadows = true
     },
-
-    [3] = {
+    [2] = { -- Balanced FPS
         Particles = true,
         Trails = true,
         PostFX = true,
@@ -320,8 +389,7 @@ local Presets = {
         HideMap = false,
         Shadows = true
     },
-
-    [4] = {
+    [3] = { -- Performance
         Particles = true,
         Trails = true,
         PostFX = true,
@@ -331,8 +399,7 @@ local Presets = {
         HideMap = false,
         Shadows = true
     },
-
-    [5] = {
+    [4] = { -- High FPS
         Particles = true,
         Trails = true,
         PostFX = true,
@@ -342,8 +409,17 @@ local Presets = {
         HideMap = false,
         Shadows = true
     },
-
-    [6] = {
+    [5] = { -- Extreme Boost
+        Particles = true,
+        Trails = true,
+        PostFX = true,
+        Lighting = true,
+        Materials = true,
+        Textures = true,
+        HideMap = false,
+        Shadows = true
+    },
+    [6] = { -- Empty Map (Max FPS)
         Particles = true,
         Trails = true,
         PostFX = true,
@@ -355,309 +431,306 @@ local Presets = {
     }
 }
 
-local function ApplyPreset(n)
-    Level = n
-
-    for key, value in pairs(Presets[n]) do
-        Features[key] = value
-    end
-
-    ApplyAll()
-end
-
 --==================================================
--- GUI
+-- GUI (MOBILE & PC FRIENDLY)
 --==================================================
 
-local BG = Color3.fromRGB(19, 22, 31)
-local BLUE = Color3.fromRGB(42, 82, 140)
-local GREEN = Color3.fromRGB(25, 160, 85)
-local RED = Color3.fromRGB(175, 55, 55)
+local BG = Color3.fromRGB(18, 21, 30)
+local PANEL = Color3.fromRGB(27, 32, 46)
+local BLUE = Color3.fromRGB(45, 92, 168)
+local GREEN = Color3.fromRGB(28, 165, 88)
+local RED = Color3.fromRGB(180, 56, 56)
+local AMBER = Color3.fromRGB(195, 130, 30)
 local WHITE = Color3.new(1, 1, 1)
 
-local function Round(obj)
+local function AddCorner(obj, radius)
     local c = Instance.new("UICorner")
-    c.CornerRadius = UDim.new(0, 9)
+    c.CornerRadius = UDim.new(0, radius or 8)
     c.Parent = obj
 end
 
-local GUI = Instance.new("ScreenGui")
-GUI.Name = "DragonFPS_V6"
-GUI.ResetOnSpawn = false
-GUI.DisplayOrder = 99999
+local ScreenGui = Instance.new("ScreenGui")
+ScreenGui.Name = "DragonFPS_V7"
+ScreenGui.ResetOnSpawn = false
+ScreenGui.IgnoreGuiInset = true
+ScreenGui.DisplayOrder = 100000
 
-local ok = pcall(function()
-    GUI.Parent = CoreGui
+local okParent = pcall(function()
+    ScreenGui.Parent = CoreGui
 end)
-
-if not ok or not GUI.Parent then
-    GUI.Parent = Player.PlayerGui
+if not okParent or not ScreenGui.Parent then
+    ScreenGui.Parent = LocalPlayer:WaitForChild("PlayerGui")
 end
 
 local Main = Instance.new("Frame")
-Main.Size = UDim2.fromOffset(290, 420)
-Main.Position = UDim2.new(0.5, -145, 0.5, -210)
+Main.Name = "MainFrame"
+Main.Size = UDim2.fromOffset(300, 440)
+Main.Position = UDim2.new(0.5, -150, 0.5, -220)
 Main.BackgroundColor3 = BG
 Main.BorderSizePixel = 0
 Main.Active = true
 Main.Draggable = true
-Main.Parent = GUI
-Round(Main)
+Main.Visible = false
+Main.Parent = ScreenGui
+AddCorner(Main, 10)
 
-local Border = Instance.new("UIStroke")
-Border.Color = BLUE
-Border.Thickness = 2
-Border.Parent = Main
+local Stroke = Instance.new("UIStroke")
+Stroke.Color = BLUE
+Stroke.Thickness = 2
+Stroke.Parent = Main
+
+local Header = Instance.new("Frame")
+Header.Size = UDim2.new(1, 0, 0, 42)
+Header.BackgroundColor3 = PANEL
+Header.BorderSizePixel = 0
+Header.Parent = Main
+AddCorner(Header, 10)
 
 local Title = Instance.new("TextLabel")
-Title.Size = UDim2.new(1, -80, 0, 42)
-Title.Position = UDim2.fromOffset(10, 0)
+Title.Size = UDim2.new(1, -86, 1, 0)
+Title.Position = UDim2.fromOffset(12, 0)
 Title.BackgroundTransparency = 1
-Title.Text = "DRAGON FPS V6"
+Title.Text = "DRAGON FPS V7"
+Title.TextXAlignment = Enum.TextXAlignment.Left
 Title.TextColor3 = WHITE
 Title.Font = Enum.Font.GothamBold
-Title.TextSize = 16
-Title.Parent = Main
+Title.TextSize = 15
+Title.Parent = Header
 
-local function TopButton(txt, x, color)
-    local b = Instance.new("TextButton")
-    b.Size = UDim2.fromOffset(30, 30)
-    b.Position = UDim2.new(1, x, 0, 6)
-    b.Text = txt
-    b.TextColor3 = WHITE
-    b.BackgroundColor3 = color
-    b.Font = Enum.Font.GothamBold
-    b.Parent = Main
-    Round(b)
-    return b
+local function MakeHeaderBtn(text, offsetX, color)
+    local btn = Instance.new("TextButton")
+    btn.Size = UDim2.fromOffset(30, 30)
+    btn.Position = UDim2.new(1, offsetX, 0.5, -15)
+    btn.BackgroundColor3 = color
+    btn.Text = text
+    btn.TextColor3 = WHITE
+    btn.Font = Enum.Font.GothamBold
+    btn.TextSize = 14
+    btn.Parent = Header
+    AddCorner(btn, 7)
+    return btn
 end
 
-local Min = TopButton("-", -68, BLUE)
-local Close = TopButton("X", -34, RED)
+local MinBtn = MakeHeaderBtn("-", -70, BLUE)
+local CloseBtn = MakeHeaderBtn("X", -36, RED)
 
 local Scroll = Instance.new("ScrollingFrame")
-Scroll.Position = UDim2.fromOffset(10, 45)
-Scroll.Size = UDim2.new(1, -20, 1, -88)
+Scroll.Position = UDim2.fromOffset(10, 48)
+Scroll.Size = UDim2.new(1, -20, 1, -78)
 Scroll.BackgroundTransparency = 1
 Scroll.BorderSizePixel = 0
-Scroll.ScrollBarThickness = 5
+Scroll.ScrollBarThickness = 4
 Scroll.AutomaticCanvasSize = Enum.AutomaticSize.Y
 Scroll.CanvasSize = UDim2.fromOffset(0, 0)
 Scroll.Parent = Main
 
-local Layout = Instance.new("UIListLayout")
-Layout.Padding = UDim.new(0, 6)
-Layout.SortOrder = Enum.SortOrder.LayoutOrder
-Layout.Parent = Scroll
+local ListLayout = Instance.new("UIListLayout")
+ListLayout.Padding = UDim.new(0, 6)
+ListLayout.SortOrder = Enum.SortOrder.LayoutOrder
+ListLayout.Parent = Scroll
 
-local Status = Instance.new("TextLabel")
-Status.Size = UDim2.new(1, -15, 0, 22)
-Status.Position = UDim2.new(0, 8, 1, -24)
-Status.BackgroundTransparency = 1
-Status.TextColor3 = WHITE
-Status.Font = Enum.Font.GothamBold
-Status.TextSize = 11
-Status.Text = "STATUS: OFF"
-Status.Parent = Main
+local StatusLabel = Instance.new("TextLabel")
+StatusLabel.Size = UDim2.new(1, -16, 0, 22)
+StatusLabel.Position = UDim2.new(0, 8, 1, -24)
+StatusLabel.BackgroundTransparency = 1
+StatusLabel.TextColor3 = Color3.fromRGB(200, 210, 230)
+StatusLabel.Font = Enum.Font.GothamBold
+StatusLabel.TextSize = 11
+StatusLabel.TextXAlignment = Enum.TextXAlignment.Left
+StatusLabel.Text = "STATUS: OFF"
+StatusLabel.Parent = Main
 
-local function Button(txt, color, callback)
-    local b = Instance.new("TextButton")
-    b.Size = UDim2.new(1, -5, 0, 38)
-    b.BackgroundColor3 = color
-    b.Text = txt
-    b.TextColor3 = WHITE
-    b.TextSize = 13
-    b.Font = Enum.Font.GothamBold
-    b.Parent = Scroll
-    Round(b)
-    b.Activated:Connect(callback)
-    return b
+local function CreateActionButton(text, color, order, onClick)
+    local btn = Instance.new("TextButton")
+    btn.Size = UDim2.new(1, -6, 0, 36)
+    btn.BackgroundColor3 = color
+    btn.Text = text
+    btn.TextColor3 = WHITE
+    btn.Font = Enum.Font.GothamBold
+    btn.TextSize = 12
+    btn.LayoutOrder = order
+    btn.Parent = Scroll
+    AddCorner(btn, 8)
+    btn.Activated:Connect(onClick)
+    return btn
 end
-
-local function UpdateStatus()
-    local count = 0
-
-    for _, value in pairs(Features) do
-        if value then count += 1 end
-    end
-
-    Status.Text = Enabled
-        and ("BOOST ON | " .. count .. "/8 FEATURES")
-        or ("BOOST OFF | " .. count .. "/8 SELECTED")
-end
-
---==================================================
--- PRESET BUTTONS
---==================================================
-
-Button("LEVEL 1 - LOW", BLUE, function()
-    ApplyPreset(1)
-    UpdateStatus()
-end)
-
-Button("LEVEL 2 - MEDIUM", BLUE, function()
-    ApplyPreset(2)
-    UpdateStatus()
-end)
-
-Button("LEVEL 3 - HIGH", BLUE, function()
-    ApplyPreset(3)
-    UpdateStatus()
-end)
-
-Button("LEVEL 4 - ULTRA", BLUE, function()
-    ApplyPreset(4)
-    UpdateStatus()
-end)
-
-Button("LEVEL 5 - EXTREME", BLUE, function()
-    ApplyPreset(5)
-    UpdateStatus()
-end)
-
-Button("LEVEL 6 - EMPTY MAP", RED, function()
-    ApplyPreset(6)
-    UpdateStatus()
-end)
-
---==================================================
--- CUSTOM FEATURE SWITCHES
---==================================================
 
 local FeatureButtons = {}
+local PresetButtons = {}
+local MasterButton = nil
 
-local function UpdateFeatureButton(name)
-    local b = FeatureButtons[name]
-    if not b then return end
-
-    local state = Features[name]
-
-    b.Text = FeatureLabels[name] ..
-        (state and " : ON" or " : OFF")
-
-    b.BackgroundColor3 = state and GREEN or RED
-end
-
-for _, name in ipairs(FeatureNames) do
-    local b = Button(
-        FeatureLabels[name],
-        Features[name] and GREEN or RED,
-        function()
-            Features[name] = not Features[name]
-
-            if Enabled then
-                ApplyAll()
-            end
-
-            UpdateFeatureButton(name)
-            UpdateStatus()
+local function RefreshUI()
+    local activeCount = 0
+    for _, name in ipairs(FeatureOrder) do
+        local isOn = Features[name]
+        if isOn then
+            activeCount += 1
         end
-    )
 
-    FeatureButtons[name] = b
-    UpdateFeatureButton(name)
-end
-
---==================================================
--- MASTER ON/OFF
---==================================================
-
-local Power
-
-Power = Button("MASTER BOOST: OFF", RED, function()
-    if Enabled then
-        RestoreAll()
-
-        Power.Text = "MASTER BOOST: OFF"
-        Power.BackgroundColor3 = RED
-    else
-        ApplyAll()
-
-        Power.Text = "MASTER BOOST: ON"
-        Power.BackgroundColor3 = GREEN
+        local fBtn = FeatureButtons[name]
+        if fBtn then
+            fBtn.Text = FeatureLabels[name] .. (isOn and " : ON" or " : OFF")
+            fBtn.BackgroundColor3 = isOn and GREEN or RED
+        end
     end
 
-    UpdateStatus()
+    for lvl, pBtn in pairs(PresetButtons) do
+        if Enabled and ActiveLevel == lvl then
+            pBtn.BackgroundColor3 = GREEN
+        elseif lvl == 6 then
+            pBtn.BackgroundColor3 = RED
+        else
+            pBtn.BackgroundColor3 = BLUE
+        end
+    end
+
+    if MasterButton then
+        if Enabled then
+            MasterButton.Text = "MASTER BOOST: ON"
+            MasterButton.BackgroundColor3 = GREEN
+        else
+            MasterButton.Text = "MASTER BOOST: OFF"
+            MasterButton.BackgroundColor3 = RED
+        end
+    end
+
+    local presetTag = ActiveLevel > 0 and (" | LV." .. ActiveLevel) or ""
+    StatusLabel.Text = (Enabled and "BOOST ON" or "BOOST OFF")
+        .. presetTag
+        .. " | " .. activeCount .. "/8 FEATURES"
+end
+
+local function ApplyPreset(level)
+    local presetData = Presets[level]
+    if not presetData then return end
+
+    ActiveLevel = level
+    for k, v in pairs(presetData) do
+        Features[k] = v
+    end
+
+    -- Khôi phục các feature bị tắt so với trạng thái cũ rồi quét lại những feature đang bật
+    for _, name in ipairs(FeatureOrder) do
+        if not Features[name] then
+            RestoreSingleFeature(name)
+        end
+    end
+
+    ApplyBoost(nil)
+    RefreshUI()
+end
+
+-- Build Preset Buttons (Order 1..6)
+local PresetNames = {
+    [1] = "LEVEL 1 - SMOOTH BASIC",
+    [2] = "LEVEL 2 - BALANCED FPS",
+    [3] = "LEVEL 3 - PERFORMANCE",
+    [4] = "LEVEL 4 - HIGH FPS",
+    [5] = "LEVEL 5 - EXTREME BOOST",
+    [6] = "LEVEL 6 - EMPTY MAP"
+}
+
+for lvl = 1, 6 do
+    PresetButtons[lvl] = CreateActionButton(PresetNames[lvl], lvl == 6 and RED or BLUE, lvl, function()
+        ApplyPreset(lvl)
+    end)
+end
+
+-- Build 8 Feature Toggles (Order 11..18)
+for idx, name in ipairs(FeatureOrder) do
+    FeatureButtons[name] = CreateActionButton(FeatureLabels[name], RED, 10 + idx, function()
+        ToggleFeature(name)
+        RefreshUI()
+    end)
+end
+
+-- Master Toggle & Restore All (Order 20..21)
+MasterButton = CreateActionButton("MASTER BOOST: OFF", RED, 20, function()
+    if Enabled then
+        RestoreAll()
+    else
+        ApplyBoost(nil)
+    end
+    RefreshUI()
 end)
 
---==================================================
--- RESTORE
---==================================================
-
-Button("RESTORE ALL GRAPHICS", BLUE, function()
+CreateActionButton("RESTORE ALL GRAPHICS", AMBER, 21, function()
     RestoreAll()
-
-    Power.Text = "MASTER BOOST: OFF"
-    Power.BackgroundColor3 = RED
-
-    UpdateStatus()
+    RefreshUI()
 end)
 
---==================================================
--- FLOATING MENU
---==================================================
+-- Floating Button & Window Controls
+local FloatingBtn = Instance.new("TextButton")
+FloatingBtn.Name = "FPS_Toggle"
+FloatingBtn.Size = UDim2.fromOffset(64, 48)
+FloatingBtn.Position = UDim2.new(0, 14, 0.45, 0)
+FloatingBtn.BackgroundColor3 = BLUE
+FloatingBtn.Text = "FPS"
+FloatingBtn.TextColor3 = WHITE
+FloatingBtn.Font = Enum.Font.GothamBold
+FloatingBtn.TextSize = 16
+FloatingBtn.Active = true
+FloatingBtn.Draggable = true
+FloatingBtn.Parent = ScreenGui
+AddCorner(FloatingBtn, 10)
 
-local Toggle = Instance.new("TextButton")
-Toggle.Size = UDim2.fromOffset(65, 52)
-Toggle.Position = UDim2.new(0, 15, 0.45, 0)
-Toggle.BackgroundColor3 = BLUE
-Toggle.Text = "FPS"
-Toggle.TextColor3 = WHITE
-Toggle.Font = Enum.Font.GothamBold
-Toggle.TextSize = 17
-Toggle.Active = true
-Toggle.Draggable = true
-Toggle.Parent = GUI
-Round(Toggle)
-
-Toggle.Activated:Connect(function()
+FloatingBtn.Activated:Connect(function()
     Main.Visible = not Main.Visible
 end)
 
-Min.Activated:Connect(function()
+MinBtn.Activated:Connect(function()
     Main.Visible = false
 end)
 
-Close.Activated:Connect(function()
+CloseBtn.Activated:Connect(function()
     Main.Visible = false
 end)
 
---==================================================
--- FPS COUNTER
---==================================================
-
+-- FPS Counter
 local Counter = Instance.new("TextLabel")
-Counter.Size = UDim2.fromOffset(115, 28)
-Counter.Position = UDim2.new(1, -125, 1, -40)
+Counter.Name = "FPS_Counter"
+Counter.Size = UDim2.fromOffset(112, 28)
+Counter.Position = UDim2.new(1, -122, 1, -38)
 Counter.BackgroundColor3 = BG
 Counter.TextColor3 = GREEN
 Counter.Text = "FPS: --"
 Counter.Font = Enum.Font.GothamBold
-Counter.TextSize = 14
-Counter.Parent = GUI
-Round(Counter)
+Counter.TextSize = 13
+Counter.Parent = ScreenGui
+AddCorner(Counter, 8)
 
-local Frames = 0
-local Last = os.clock()
+local frameCounter = 0
+local lastTick = os.clock()
 
-RunService.RenderStepped:Connect(function()
-    Frames += 1
-
+local connRender = RunService.RenderStepped:Connect(function()
+    frameCounter += 1
     local now = os.clock()
-
-    if now - Last >= 1 then
-        Counter.Text = "FPS: " ..
-            math.floor(Frames / (now - Last))
-
-        Frames = 0
-        Last = now
+    local elapsed = now - lastTick
+    if elapsed >= 1 then
+        local fps = math.floor(frameCounter / elapsed + 0.5)
+        Counter.Text = "FPS: " .. fps
+        if fps >= 55 then
+            Counter.TextColor3 = GREEN
+        elseif fps >= 30 then
+            Counter.TextColor3 = AMBER
+        else
+            Counter.TextColor3 = RED
+        end
+        frameCounter = 0
+        lastTick = now
     end
 end)
 
--- INITIAL
-Main.Visible = false
-UpdateStatus()
+-- Cleanup khi LocalPlayer rời đi
+LocalPlayer.AncestryChanged:Connect(function(_, parent)
+    if not parent then
+        RestoreAll()
+        if connWorkspace then connWorkspace:Disconnect() end
+        if connLighting then connLighting:Disconnect() end
+        if connRender then connRender:Disconnect() end
+        if ScreenGui then ScreenGui:Destroy() end
+    end
+end)
 
-print("DRAGON FPS BOOSTER V6 LOADED")
-print("8 custom switches ready")
-print("Tap FPS to open menu")
+RefreshUI()
+print("[DRAGON FPS V7] Ready | Incremental boost + UI sync enabled.")
