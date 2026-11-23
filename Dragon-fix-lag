@@ -1,148 +1,353 @@
 
 --[[
-    BLOX FRUITS FPS BOOSTER V1
-    6 Optimization Levels
-    Client-side graphics optimization
+    BLOX FRUITS FPS BOOSTER V2
+    MOBILE FIX - 6 LEVELS
+    Toggle / Minimize / Restore / FPS
 ]]
 
 local Players = game:GetService("Players")
 local Lighting = game:GetService("Lighting")
-local RunService = game:GetService("RunService")
 local Workspace = game:GetService("Workspace")
+local RunService = game:GetService("RunService")
 
 local Player = Players.LocalPlayer
+local CoreGui = game:GetService("CoreGui")
 
--- Save original settings
-local Original = {
-    GlobalShadows = Lighting.GlobalShadows,
-    FogEnd = Lighting.FogEnd,
-    Brightness = Lighting.Brightness,
-    Quality = settings().Rendering.QualityLevel
-}
-
-local CurrentLevel = 0
-local Enabled = false
-
--- GUI
-local Gui = Instance.new("ScreenGui")
-Gui.Name = "FPSBooster"
-Gui.ResetOnSpawn = false
-
+-- Cleanup old GUI
 pcall(function()
-    Gui.Parent = game:GetService("CoreGui")
+    CoreGui:FindFirstChild("DragonFPS_V2"):Destroy()
+end)
+pcall(function()
+    Player.PlayerGui:FindFirstChild("DragonFPS_V2"):Destroy()
 end)
 
-if not Gui.Parent then
-    Gui.Parent = Player:WaitForChild("PlayerGui")
+local GUI = Instance.new("ScreenGui")
+GUI.Name = "DragonFPS_V2"
+GUI.ResetOnSpawn = false
+GUI.DisplayOrder = 999
+GUI.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+
+local parentOK = pcall(function()
+    GUI.Parent = CoreGui
+end)
+
+if not parentOK then
+    GUI.Parent = Player:WaitForChild("PlayerGui")
 end
 
-local Frame = Instance.new("Frame", Gui)
-Frame.Size = UDim2.fromOffset(250, 340)
-Frame.Position = UDim2.new(0.5, -125, 0.3, 0)
-Frame.BackgroundColor3 = Color3.fromRGB(20, 22, 30)
-Frame.BorderSizePixel = 0
+-- SETTINGS
+local Enabled = false
+local SelectedLevel = 1
+local Original = {}
+local OriginalQuality
 
-local Corner = Instance.new("UICorner", Frame)
-Corner.CornerRadius = UDim.new(0, 12)
+-- Save and change properties
+local function SetProperty(obj, prop, value)
+    if not obj then return end
 
-local Title = Instance.new("TextLabel", Frame)
-Title.Size = UDim2.new(1, 0, 0, 42)
-Title.BackgroundTransparency = 1
-Title.Text = "FPS BOOSTER 6 LEVELS"
-Title.TextColor3 = Color3.new(1,1,1)
-Title.TextSize = 17
-Title.Font = Enum.Font.GothamBold
-
-local function MakeButton(name, y, callback)
-    local B = Instance.new("TextButton", Frame)
-    B.Size = UDim2.new(0.85, 0, 0, 34)
-    B.Position = UDim2.new(0.075, 0, 0, y)
-    B.BackgroundColor3 = Color3.fromRGB(45, 75, 120)
-    B.TextColor3 = Color3.new(1,1,1)
-    B.TextSize = 13
-    B.Font = Enum.Font.GothamBold
-    B.Text = name
-
-    Instance.new("UICorner", B).CornerRadius = UDim.new(0, 7)
-    B.MouseButton1Click:Connect(callback)
-    return B
-end
-
-local function Optimize(level)
-    CurrentLevel = level
-    Enabled = true
-
-    Lighting.GlobalShadows = false
-    Lighting.FogEnd = 100000
-    settings().Rendering.QualityLevel = Enum.QualityLevel.Level01
-
-    local terrain = Workspace:FindFirstChildOfClass("Terrain")
-
-    if terrain then
-        pcall(function()
-            terrain.Decoration = false
-        end)
+    if not Original[obj] then
+        Original[obj] = {}
     end
 
+    if Original[obj][prop] == nil then
+        local ok, old = pcall(function()
+            return obj[prop]
+        end)
+
+        if not ok then return end
+        Original[obj][prop] = old
+    end
+
+    pcall(function()
+        obj[prop] = value
+    end)
+end
+
+-- Restore graphics
+local function Restore()
+    for obj, properties in pairs(Original) do
+        for prop, old in pairs(properties) do
+            pcall(function()
+                obj[prop] = old
+            end)
+        end
+    end
+
+    Original = {}
+
+    if OriginalQuality ~= nil then
+        pcall(function()
+            settings().Rendering.QualityLevel = OriginalQuality
+        end)
+        OriginalQuality = nil
+    end
+end
+
+-- Apply selected level
+local function Optimize(level)
+    Restore()
+
+    SelectedLevel = level
+
+    pcall(function()
+        if OriginalQuality == nil then
+            OriginalQuality = settings().Rendering.QualityLevel
+        end
+
+        settings().Rendering.QualityLevel =
+            Enum.QualityLevel.Level01
+    end)
+
+    SetProperty(Lighting, "GlobalShadows", false)
+    SetProperty(Lighting, "FogEnd", 1000000)
+
     for _, obj in ipairs(Workspace:GetDescendants()) do
-        if obj:IsA("ParticleEmitter") then
-            obj.Enabled = level < 2
-        elseif obj:IsA("Trail") or obj:IsA("Beam") then
-            obj.Enabled = level < 3
-        elseif obj:IsA("PostEffect") then
-            obj.Enabled = level < 4
-        elseif obj:IsA("BasePart") then
-            if level >= 5 then
-                obj.CastShadow = false
+
+        if level >= 2 then
+            if obj:IsA("ParticleEmitter") then
+                SetProperty(obj, "Enabled", false)
+            end
+        end
+
+        if level >= 3 then
+            if obj:IsA("Trail") or obj:IsA("Beam") then
+                SetProperty(obj, "Enabled", false)
+            end
+        end
+
+        if level >= 4 then
+            if obj:IsA("PostEffect") then
+                SetProperty(obj, "Enabled", false)
+            end
+        end
+
+        if level >= 5 then
+            if obj:IsA("BasePart") then
+                SetProperty(obj, "CastShadow", false)
+            end
+        end
+
+        if level >= 6 then
+            if obj:IsA("Decal") or obj:IsA("Texture") then
+                SetProperty(obj, "Transparency", 1)
             end
         end
     end
 
-    print("FPS Booster Level:", level)
+    local terrain = Workspace:FindFirstChildOfClass("Terrain")
+
+    if terrain and level >= 6 then
+        SetProperty(terrain, "Decoration", false)
+    end
 end
 
-local function Restore()
-    Enabled = false
-    CurrentLevel = 0
+-- COLORS
+local BG = Color3.fromRGB(22, 24, 32)
+local BLUE = Color3.fromRGB(43, 82, 135)
+local GREEN = Color3.fromRGB(30, 155, 85)
+local RED = Color3.fromRGB(180, 55, 55)
+local WHITE = Color3.new(1, 1, 1)
 
-    Lighting.GlobalShadows = Original.GlobalShadows
-    Lighting.FogEnd = Original.FogEnd
-    Lighting.Brightness = Original.Brightness
+-- Main panel
+local Main = Instance.new("Frame")
+Main.Name = "Main"
+Main.Size = UDim2.fromOffset(285, 355)
+Main.Position = UDim2.new(0.5, -142, 0.5, -177)
+Main.BackgroundColor3 = BG
+Main.BorderSizePixel = 0
+Main.Active = true
+Main.Draggable = true
+Main.Parent = GUI
 
-    settings().Rendering.QualityLevel = Original.Quality
+Instance.new("UICorner", Main).CornerRadius =
+    UDim.new(0, 13)
 
-    print("Graphics settings restored. Rejoin if some effects remain disabled.")
+local Stroke = Instance.new("UIStroke", Main)
+Stroke.Color = BLUE
+Stroke.Thickness = 2
+
+-- Header
+local Header = Instance.new("TextLabel")
+Header.Size = UDim2.new(1, -75, 0, 42)
+Header.Position = UDim2.fromOffset(10, 0)
+Header.BackgroundTransparency = 1
+Header.Text = "DRAGON FPS BOOSTER"
+Header.TextColor3 = WHITE
+Header.Font = Enum.Font.GothamBold
+Header.TextSize = 16
+Header.Parent = Main
+
+-- Minimize
+local Min = Instance.new("TextButton")
+Min.Size = UDim2.fromOffset(32, 30)
+Min.Position = UDim2.new(1, -70, 0, 6)
+Min.Text = "-"
+Min.TextSize = 22
+Min.TextColor3 = WHITE
+Min.BackgroundColor3 = BLUE
+Min.Parent = Main
+
+-- Close / Hide
+local Close = Instance.new("TextButton")
+Close.Size = UDim2.fromOffset(32, 30)
+Close.Position = UDim2.new(1, -36, 0, 6)
+Close.Text = "X"
+Close.TextColor3 = WHITE
+Close.BackgroundColor3 = RED
+Close.Parent = Main
+
+-- Floating toggle
+local Toggle = Instance.new("TextButton")
+Toggle.Size = UDim2.fromOffset(58, 48)
+Toggle.Position = UDim2.new(0, 15, 0.55, 0)
+Toggle.Text = "FPS"
+Toggle.TextSize = 16
+Toggle.Font = Enum.Font.GothamBold
+Toggle.TextColor3 = WHITE
+Toggle.BackgroundColor3 = BLUE
+Toggle.Active = true
+Toggle.Draggable = true
+Toggle.Parent = GUI
+
+Instance.new("UICorner", Toggle).CornerRadius =
+    UDim.new(0, 12)
+
+-- Scroll area
+local Scroll = Instance.new("ScrollingFrame")
+Scroll.Position = UDim2.fromOffset(12, 48)
+Scroll.Size = UDim2.new(1, -24, 1, -105)
+Scroll.BackgroundTransparency = 1
+Scroll.BorderSizePixel = 0
+Scroll.ScrollBarThickness = 4
+Scroll.CanvasSize = UDim2.fromOffset(0, 370)
+Scroll.Parent = Main
+
+local Layout = Instance.new("UIListLayout")
+Layout.Padding = UDim.new(0, 7)
+Layout.SortOrder = Enum.SortOrder.LayoutOrder
+Layout.Parent = Scroll
+
+local function Button(name, color, callback)
+    local B = Instance.new("TextButton")
+    B.Size = UDim2.new(1, -8, 0, 42)
+    B.BackgroundColor3 = color
+    B.Text = name
+    B.TextColor3 = WHITE
+    B.TextSize = 14
+    B.Font = Enum.Font.GothamBold
+    B.AutoButtonColor = true
+    B.Parent = Scroll
+
+    Instance.new("UICorner", B).CornerRadius =
+        UDim.new(0, 8)
+
+    B.Activated:Connect(callback)
+
+    return B
 end
+
+local Status = Instance.new("TextLabel")
+Status.Size = UDim2.new(1, -20, 0, 24)
+Status.Position = UDim2.new(0, 10, 1, -29)
+Status.BackgroundTransparency = 1
+Status.TextColor3 = WHITE
+Status.TextSize = 12
+Status.Font = Enum.Font.GothamBold
+Status.Text = "STATUS: OFF"
+Status.Parent = Main
+
+local LevelButtons = {}
 
 for i = 1, 6 do
-    MakeButton("LEVEL " .. i, 45 + i * 39, function()
-        Optimize(i)
+    local B = Button("LEVEL " .. i, BLUE, function()
+        SelectedLevel = i
+
+        if Enabled then
+            Optimize(i)
+            Status.Text = "STATUS: ON | LEVEL " .. i
+        else
+            Status.Text = "SELECTED LEVEL: " .. i
+        end
+
+        for n, btn in pairs(LevelButtons) do
+            btn.BackgroundColor3 =
+                (n == i and GREEN or BLUE)
+        end
     end)
+
+    LevelButtons[i] = B
 end
 
-MakeButton("RESTORE GRAPHICS", 285, Restore)
+-- ON / OFF
+local Power = Button("FPS BOOST: OFF", GREEN, function()
+    Enabled = not Enabled
 
--- FPS display
-local FPS = Instance.new("TextLabel", Frame)
-FPS.Size = UDim2.new(1, 0, 0, 22)
-FPS.Position = UDim2.new(0, 0, 1, -24)
-FPS.BackgroundTransparency = 1
-FPS.TextColor3 = Color3.fromRGB(100,255,130)
-FPS.TextSize = 13
-FPS.Font = Enum.Font.GothamBold
-
-local frames = 0
-local last = os.clock()
-
-RunService.RenderStepped:Connect(function()
-    frames += 1
-    local now = os.clock()
-
-    if now - last >= 1 then
-        FPS.Text = "FPS: " .. math.floor(frames / (now - last))
-        frames = 0
-        last = now
+    if Enabled then
+        Optimize(SelectedLevel)
+        Power.Text = "FPS BOOST: ON"
+        Power.BackgroundColor3 = GREEN
+        Status.Text = "STATUS: ON | LEVEL " .. SelectedLevel
+    else
+        Restore()
+        Power.Text = "FPS BOOST: OFF"
+        Power.BackgroundColor3 = RED
+        Status.Text = "STATUS: OFF"
     end
 end)
 
-print("Blox Fruits FPS Booster loaded!")
+local Reset = Button("RESTORE GRAPHICS", RED, function()
+    Enabled = false
+    Restore()
+
+    Power.Text = "FPS BOOST: OFF"
+    Power.BackgroundColor3 = RED
+    Status.Text = "GRAPHICS RESTORED"
+end)
+
+-- Menu controls
+local function ShowMenu()
+    Main.Visible = true
+end
+
+local function HideMenu()
+    Main.Visible = false
+end
+
+Toggle.Activated:Connect(function()
+    Main.Visible = not Main.Visible
+end)
+
+Min.Activated:Connect(HideMenu)
+Close.Activated:Connect(HideMenu)
+
+-- FPS counter
+local FPS = 0
+local Frames = 0
+local Last = os.clock()
+
+local Counter = Instance.new("TextLabel")
+Counter.Size = UDim2.fromOffset(125, 25)
+Counter.Position = UDim2.new(1, -135, 1, -30)
+Counter.BackgroundColor3 = BG
+Counter.BackgroundTransparency = 0.15
+Counter.TextColor3 = Color3.fromRGB(90, 255, 130)
+Counter.Font = Enum.Font.GothamBold
+Counter.TextSize = 13
+Counter.Parent = GUI
+
+RunService.RenderStepped:Connect(function()
+    Frames += 1
+
+    local Now = os.clock()
+
+    if Now - Last >= 1 then
+        FPS = math.floor(Frames / (Now - Last))
+        Counter.Text = "FPS: " .. FPS
+
+        Frames = 0
+        Last = Now
+    end
+end)
+
+print("DRAGON FPS BOOSTER V2 LOADED")
+print("Mobile menu ready!")
