@@ -1,6 +1,9 @@
 
--- DRAGON FPS BOOSTER V3
--- MOBILE MENU / 6 LEVELS / AUTO APPLY
+--==================================================
+-- DRAGON FPS BOOSTER V6 - CUSTOM EXTREME
+-- Mobile / Executor / 6 Presets / 8 Toggles
+-- Client-side graphics optimization
+--==================================================
 
 local Players = game:GetService("Players")
 local Lighting = game:GetService("Lighting")
@@ -8,47 +11,76 @@ local Workspace = game:GetService("Workspace")
 local RunService = game:GetService("RunService")
 
 local Player = Players.LocalPlayer
+local CoreGui = game:GetService("CoreGui")
 
--- Remove old version
-for _, parent in ipairs({game:GetService("CoreGui"), Player:WaitForChild("PlayerGui")}) do
+-- CLEAN OLD GUI
+for _, parent in ipairs({CoreGui, Player:WaitForChild("PlayerGui")}) do
     pcall(function()
-        local old = parent:FindFirstChild("DragonFPS_V3")
+        local old = parent:FindFirstChild("DragonFPS_V6")
         if old then old:Destroy() end
     end)
 end
 
-local GUI = Instance.new("ScreenGui")
-GUI.Name = "DragonFPS_V3"
-GUI.ResetOnSpawn = false
-GUI.DisplayOrder = 9999
-GUI.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
-
-local ok = pcall(function()
-    GUI.Parent = game:GetService("CoreGui")
-end)
-
-if not ok or not GUI.Parent then
-    GUI.Parent = Player:WaitForChild("PlayerGui")
-end
-
+--==================================================
 -- STATE
+--==================================================
+
 local Enabled = false
 local Level = 1
 local Saved = {}
-local SavedQuality = nil
-local Connections = {}
+local OriginalQuality = nil
+local Applying = false
 
-local function SaveSet(obj, prop, value)
+local Features = {
+    Particles = true,
+    Trails = true,
+    PostFX = true,
+    Lighting = true,
+    Materials = true,
+    Textures = false,
+    HideMap = false,
+    Shadows = true
+}
+
+local FeatureNames = {
+    "Particles",
+    "Trails",
+    "PostFX",
+    "Lighting",
+    "Materials",
+    "Textures",
+    "HideMap",
+    "Shadows"
+}
+
+local FeatureLabels = {
+    Particles = "Particle / Fire / Smoke",
+    Trails = "Trail / Beam",
+    PostFX = "Post Processing",
+    Lighting = "Dynamic Lighting",
+    Materials = "Low Materials",
+    Textures = "Remove Textures",
+    HideMap = "Hide Entire Map",
+    Shadows = "Shadow Removal"
+}
+
+--==================================================
+-- SAVE / RESTORE
+--==================================================
+
+local function Set(obj, prop, value)
+    if not obj then return end
+
     if not Saved[obj] then
         Saved[obj] = {}
     end
 
     if Saved[obj][prop] == nil then
-        local success, old = pcall(function()
+        local ok, old = pcall(function()
             return obj[prop]
         end)
 
-        if not success then return end
+        if not ok then return end
         Saved[obj][prop] = old
     end
 
@@ -58,10 +90,10 @@ local function SaveSet(obj, prop, value)
 end
 
 local function RestoreProperties()
-    for obj, props in pairs(Saved) do
-        for prop, value in pairs(props) do
+    for obj, properties in pairs(Saved) do
+        for prop, old in pairs(properties) do
             pcall(function()
-                obj[prop] = value
+                obj[prop] = old
             end)
         end
     end
@@ -71,82 +103,126 @@ end
 
 local function RestoreAll()
     Enabled = false
-
     RestoreProperties()
 
-    if SavedQuality ~= nil then
+    if OriginalQuality ~= nil then
         pcall(function()
-            settings().Rendering.QualityLevel = SavedQuality
+            settings().Rendering.QualityLevel = OriginalQuality
         end)
-        SavedQuality = nil
+
+        OriginalQuality = nil
     end
 end
 
--- OPTIMIZATION ENGINE
-local function OptimizeObject(obj)
-    if not Enabled then return end
+--==================================================
+-- PROTECTION
+--==================================================
 
-    if Level >= 2 then
+local function IsProtected(obj)
+    local current = obj
+
+    while current and current ~= Workspace do
+        if current:IsA("Model") then
+            if current:FindFirstChildOfClass("Humanoid") then
+                return true
+            end
+        end
+
+        if current:IsA("Tool") then
+            return true
+        end
+
+        current = current.Parent
+    end
+
+    return false
+end
+
+--==================================================
+-- OPTIMIZATION ENGINE
+--==================================================
+
+local function OptimizeObject(obj)
+    if not Enabled or IsProtected(obj) then
+        return
+    end
+
+    -- 1. PARTICLES
+    if Features.Particles then
         if obj:IsA("ParticleEmitter")
         or obj:IsA("Fire")
         or obj:IsA("Smoke")
         or obj:IsA("Sparkles") then
-            SaveSet(obj, "Enabled", false)
+            Set(obj, "Enabled", false)
         end
     end
 
-    if Level >= 3 then
+    -- 2. TRAILS
+    if Features.Trails then
         if obj:IsA("Trail") or obj:IsA("Beam") then
-            SaveSet(obj, "Enabled", false)
+            Set(obj, "Enabled", false)
         end
     end
 
-    if Level >= 4 then
+    -- 3. POST FX
+    if Features.PostFX then
         if obj:IsA("PostEffect") then
-            SaveSet(obj, "Enabled", false)
+            Set(obj, "Enabled", false)
         end
 
         if obj:IsA("Atmosphere") then
-            SaveSet(obj, "Density", 0)
-            SaveSet(obj, "Haze", 0)
-            SaveSet(obj, "Glare", 0)
+            Set(obj, "Density", 0)
+            Set(obj, "Haze", 0)
+            Set(obj, "Glare", 0)
         end
     end
 
-    if Level >= 5 then
-        if obj:IsA("BasePart") then
-            SaveSet(obj, "CastShadow", false)
-        end
-    end
-
-    if Level >= 6 then
-        if obj:IsA("Decal") or obj:IsA("Texture") then
-            SaveSet(obj, "Transparency", 1)
-        end
-
+    -- 4. LIGHTING
+    if Features.Lighting then
         if obj:IsA("PointLight")
         or obj:IsA("SpotLight")
         or obj:IsA("SurfaceLight") then
-            SaveSet(obj, "Enabled", false)
+            Set(obj, "Enabled", false)
         end
+    end
 
-        if obj:IsA("Clouds") then
-            SaveSet(obj, "Enabled", false)
+    -- 5. MATERIALS
+    if Features.Materials and obj:IsA("BasePart") then
+        Set(obj, "Material", Enum.Material.SmoothPlastic)
+        Set(obj, "Reflectance", 0)
+    end
+
+    -- 6. TEXTURES
+    if Features.Textures then
+        if obj:IsA("Decal") or obj:IsA("Texture") then
+            Set(obj, "Transparency", 1)
         end
+    end
+
+    -- 7. HIDE MAP
+    if Features.HideMap and obj:IsA("BasePart") then
+        Set(obj, "LocalTransparencyModifier", 1)
+    end
+
+    -- 8. SHADOWS
+    if Features.Shadows and obj:IsA("BasePart") then
+        Set(obj, "CastShadow", false)
     end
 end
 
-local function ApplyLevel(n)
-    Level = n
+local function ApplyGlobal()
+    if Features.Shadows then
+        Set(Lighting, "GlobalShadows", false)
+    end
 
-    -- Reset previous level before applying the new one
-    RestoreProperties()
+    if Features.Lighting then
+        Set(Lighting, "EnvironmentDiffuseScale", 0)
+        Set(Lighting, "EnvironmentSpecularScale", 0)
+    end
 
-    Enabled = true
-
-    if SavedQuality == nil then
+    if OriginalQuality == nil then
         pcall(function()
-            SavedQuality = settings().Rendering.QualityLevel
+            OriginalQuality = settings().Rendering.QualityLevel
         end)
     end
 
@@ -155,199 +231,384 @@ local function ApplyLevel(n)
             Enum.QualityLevel.Level01
     end)
 
-    SaveSet(Lighting, "GlobalShadows", false)
-
-    if n >= 1 then
-        for _, obj in ipairs(Workspace:GetDescendants()) do
-            OptimizeObject(obj)
-        end
-
-        for _, obj in ipairs(Lighting:GetDescendants()) do
-            OptimizeObject(obj)
-        end
-    end
-
     local terrain = Workspace:FindFirstChildOfClass("Terrain")
 
-    if terrain and n >= 6 then
-        SaveSet(terrain, "Decoration", false)
+    if terrain and Features.HideMap then
+        Set(terrain, "Decoration", false)
     end
 end
 
--- Automatically optimize newly created effects
-Connections[#Connections + 1] =
-    Workspace.DescendantAdded:Connect(function(obj)
-        if Enabled then
-            OptimizeObject(obj)
-        end
-    end)
+local function ApplyAll()
+    if Applying then return end
+    Applying = true
 
-Connections[#Connections + 1] =
-    Lighting.DescendantAdded:Connect(function(obj)
-        if Enabled then
-            OptimizeObject(obj)
-        end
-    end)
+    RestoreProperties()
 
--- UI COLORS
-local BG = Color3.fromRGB(20, 23, 32)
-local BLUE = Color3.fromRGB(42, 83, 140)
+    Enabled = true
+
+    ApplyGlobal()
+
+    for _, obj in ipairs(Workspace:GetDescendants()) do
+        OptimizeObject(obj)
+    end
+
+    for _, obj in ipairs(Lighting:GetDescendants()) do
+        OptimizeObject(obj)
+    end
+
+    Applying = false
+end
+
+--==================================================
+-- NEW OBJECTS
+--==================================================
+
+Workspace.DescendantAdded:Connect(function(obj)
+    if Enabled then
+        task.defer(function()
+            if Enabled and obj.Parent then
+                OptimizeObject(obj)
+            end
+        end)
+    end
+end)
+
+Lighting.DescendantAdded:Connect(function(obj)
+    if Enabled then
+        task.defer(function()
+            if Enabled and obj.Parent then
+                OptimizeObject(obj)
+            end
+        end)
+    end
+end)
+
+--==================================================
+-- PRESETS
+--==================================================
+
+local Presets = {
+    [1] = {
+        Particles = false,
+        Trails = false,
+        PostFX = false,
+        Lighting = false,
+        Materials = false,
+        Textures = false,
+        HideMap = false,
+        Shadows = true
+    },
+
+    [2] = {
+        Particles = true,
+        Trails = false,
+        PostFX = false,
+        Lighting = false,
+        Materials = false,
+        Textures = false,
+        HideMap = false,
+        Shadows = true
+    },
+
+    [3] = {
+        Particles = true,
+        Trails = true,
+        PostFX = true,
+        Lighting = false,
+        Materials = false,
+        Textures = false,
+        HideMap = false,
+        Shadows = true
+    },
+
+    [4] = {
+        Particles = true,
+        Trails = true,
+        PostFX = true,
+        Lighting = true,
+        Materials = true,
+        Textures = false,
+        HideMap = false,
+        Shadows = true
+    },
+
+    [5] = {
+        Particles = true,
+        Trails = true,
+        PostFX = true,
+        Lighting = true,
+        Materials = true,
+        Textures = true,
+        HideMap = false,
+        Shadows = true
+    },
+
+    [6] = {
+        Particles = true,
+        Trails = true,
+        PostFX = true,
+        Lighting = true,
+        Materials = true,
+        Textures = true,
+        HideMap = true,
+        Shadows = true
+    }
+}
+
+local function ApplyPreset(n)
+    Level = n
+
+    for key, value in pairs(Presets[n]) do
+        Features[key] = value
+    end
+
+    ApplyAll()
+end
+
+--==================================================
+-- GUI
+--==================================================
+
+local BG = Color3.fromRGB(19, 22, 31)
+local BLUE = Color3.fromRGB(42, 82, 140)
 local GREEN = Color3.fromRGB(25, 160, 85)
 local RED = Color3.fromRGB(175, 55, 55)
 local WHITE = Color3.new(1, 1, 1)
 
-local function Corner(obj, radius)
+local function Round(obj)
     local c = Instance.new("UICorner")
-    c.CornerRadius = UDim.new(0, radius)
+    c.CornerRadius = UDim.new(0, 9)
     c.Parent = obj
 end
 
--- MAIN MENU
+local GUI = Instance.new("ScreenGui")
+GUI.Name = "DragonFPS_V6"
+GUI.ResetOnSpawn = false
+GUI.DisplayOrder = 99999
+
+local ok = pcall(function()
+    GUI.Parent = CoreGui
+end)
+
+if not ok or not GUI.Parent then
+    GUI.Parent = Player.PlayerGui
+end
+
 local Main = Instance.new("Frame")
-Main.Size = UDim2.fromOffset(280, 390)
-Main.Position = UDim2.new(0.5, -140, 0.5, -195)
+Main.Size = UDim2.fromOffset(290, 420)
+Main.Position = UDim2.new(0.5, -145, 0.5, -210)
 Main.BackgroundColor3 = BG
 Main.BorderSizePixel = 0
 Main.Active = true
 Main.Draggable = true
 Main.Parent = GUI
-Main.ZIndex = 2
-Corner(Main, 14)
+Round(Main)
 
 local Border = Instance.new("UIStroke")
 Border.Color = BLUE
 Border.Thickness = 2
 Border.Parent = Main
 
-local Header = Instance.new("TextLabel")
-Header.Size = UDim2.new(1, -85, 0, 43)
-Header.Position = UDim2.fromOffset(10, 0)
-Header.BackgroundTransparency = 1
-Header.Text = "DRAGON FPS BOOSTER"
-Header.TextColor3 = WHITE
-Header.Font = Enum.Font.GothamBold
-Header.TextSize = 15
-Header.Parent = Main
+local Title = Instance.new("TextLabel")
+Title.Size = UDim2.new(1, -80, 0, 42)
+Title.Position = UDim2.fromOffset(10, 0)
+Title.BackgroundTransparency = 1
+Title.Text = "DRAGON FPS V6"
+Title.TextColor3 = WHITE
+Title.Font = Enum.Font.GothamBold
+Title.TextSize = 16
+Title.Parent = Main
 
-local function MakeTopButton(text, x, color)
+local function TopButton(txt, x, color)
     local b = Instance.new("TextButton")
-    b.Size = UDim2.fromOffset(32, 30)
+    b.Size = UDim2.fromOffset(30, 30)
     b.Position = UDim2.new(1, x, 0, 6)
-    b.Text = text
+    b.Text = txt
     b.TextColor3 = WHITE
     b.BackgroundColor3 = color
     b.Font = Enum.Font.GothamBold
-    b.TextSize = 17
     b.Parent = Main
-    Corner(b, 7)
+    Round(b)
     return b
 end
 
-local Min = MakeTopButton("-", -70, BLUE)
-local Close = MakeTopButton("X", -35, RED)
+local Min = TopButton("-", -68, BLUE)
+local Close = TopButton("X", -34, RED)
 
--- SCROLL MENU
 local Scroll = Instance.new("ScrollingFrame")
-Scroll.Position = UDim2.fromOffset(12, 48)
-Scroll.Size = UDim2.new(1, -24, 1, -100)
+Scroll.Position = UDim2.fromOffset(10, 45)
+Scroll.Size = UDim2.new(1, -20, 1, -88)
 Scroll.BackgroundTransparency = 1
 Scroll.BorderSizePixel = 0
 Scroll.ScrollBarThickness = 5
-Scroll.CanvasSize = UDim2.fromOffset(0, 440)
+Scroll.AutomaticCanvasSize = Enum.AutomaticSize.Y
+Scroll.CanvasSize = UDim2.fromOffset(0, 0)
 Scroll.Parent = Main
 
 local Layout = Instance.new("UIListLayout")
-Layout.Padding = UDim.new(0, 7)
+Layout.Padding = UDim.new(0, 6)
 Layout.SortOrder = Enum.SortOrder.LayoutOrder
 Layout.Parent = Scroll
 
 local Status = Instance.new("TextLabel")
-Status.Size = UDim2.new(1, -20, 0, 23)
-Status.Position = UDim2.new(0, 10, 1, -27)
+Status.Size = UDim2.new(1, -15, 0, 22)
+Status.Position = UDim2.new(0, 8, 1, -24)
 Status.BackgroundTransparency = 1
 Status.TextColor3 = WHITE
-Status.Text = "STATUS: OFF"
 Status.Font = Enum.Font.GothamBold
-Status.TextSize = 12
+Status.TextSize = 11
+Status.Text = "STATUS: OFF"
 Status.Parent = Main
 
-local function MakeButton(text, color, callback)
+local function Button(txt, color, callback)
     local b = Instance.new("TextButton")
-    b.Size = UDim2.new(1, -5, 0, 43)
+    b.Size = UDim2.new(1, -5, 0, 38)
     b.BackgroundColor3 = color
-    b.Text = text
+    b.Text = txt
     b.TextColor3 = WHITE
+    b.TextSize = 13
     b.Font = Enum.Font.GothamBold
-    b.TextSize = 14
     b.Parent = Scroll
-    b.AutoButtonColor = true
-    Corner(b, 8)
+    Round(b)
     b.Activated:Connect(callback)
     return b
 end
 
-local LevelButtons = {}
-
 local function UpdateStatus()
-    Status.Text = Enabled and
-        ("STATUS: ON | LEVEL " .. Level) or
-        "STATUS: OFF"
+    local count = 0
+
+    for _, value in pairs(Features) do
+        if value then count += 1 end
+    end
+
+    Status.Text = Enabled
+        and ("BOOST ON | " .. count .. "/8 FEATURES")
+        or ("BOOST OFF | " .. count .. "/8 SELECTED")
 end
 
--- Six levels: selecting one applies immediately
-for i = 1, 6 do
-    local b = MakeButton("LEVEL " .. i, BLUE, function()
-        ApplyLevel(i)
+--==================================================
+-- PRESET BUTTONS
+--==================================================
 
-        for n, btn in ipairs(LevelButtons) do
-            btn.BackgroundColor3 =
-                n == i and GREEN or BLUE
+Button("LEVEL 1 - LOW", BLUE, function()
+    ApplyPreset(1)
+    UpdateStatus()
+end)
+
+Button("LEVEL 2 - MEDIUM", BLUE, function()
+    ApplyPreset(2)
+    UpdateStatus()
+end)
+
+Button("LEVEL 3 - HIGH", BLUE, function()
+    ApplyPreset(3)
+    UpdateStatus()
+end)
+
+Button("LEVEL 4 - ULTRA", BLUE, function()
+    ApplyPreset(4)
+    UpdateStatus()
+end)
+
+Button("LEVEL 5 - EXTREME", BLUE, function()
+    ApplyPreset(5)
+    UpdateStatus()
+end)
+
+Button("LEVEL 6 - EMPTY MAP", RED, function()
+    ApplyPreset(6)
+    UpdateStatus()
+end)
+
+--==================================================
+-- CUSTOM FEATURE SWITCHES
+--==================================================
+
+local FeatureButtons = {}
+
+local function UpdateFeatureButton(name)
+    local b = FeatureButtons[name]
+    if not b then return end
+
+    local state = Features[name]
+
+    b.Text = FeatureLabels[name] ..
+        (state and " : ON" or " : OFF")
+
+    b.BackgroundColor3 = state and GREEN or RED
+end
+
+for _, name in ipairs(FeatureNames) do
+    local b = Button(
+        FeatureLabels[name],
+        Features[name] and GREEN or RED,
+        function()
+            Features[name] = not Features[name]
+
+            if Enabled then
+                ApplyAll()
+            end
+
+            UpdateFeatureButton(name)
+            UpdateStatus()
         end
+    )
 
-        UpdateStatus()
-    end)
-
-    LevelButtons[i] = b
+    FeatureButtons[name] = b
+    UpdateFeatureButton(name)
 end
+
+--==================================================
+-- MASTER ON/OFF
+--==================================================
 
 local Power
 
-Power = MakeButton("FPS BOOST: OFF", GREEN, function()
+Power = Button("MASTER BOOST: OFF", RED, function()
     if Enabled then
         RestoreAll()
-        Power.Text = "FPS BOOST: OFF"
+
+        Power.Text = "MASTER BOOST: OFF"
         Power.BackgroundColor3 = RED
     else
-        ApplyLevel(Level)
-        Power.Text = "FPS BOOST: ON"
+        ApplyAll()
+
+        Power.Text = "MASTER BOOST: ON"
         Power.BackgroundColor3 = GREEN
     end
 
     UpdateStatus()
 end)
 
-local Reset = MakeButton("RESTORE GRAPHICS", RED, function()
+--==================================================
+-- RESTORE
+--==================================================
+
+Button("RESTORE ALL GRAPHICS", BLUE, function()
     RestoreAll()
 
-    Power.Text = "FPS BOOST: OFF"
+    Power.Text = "MASTER BOOST: OFF"
     Power.BackgroundColor3 = RED
 
     UpdateStatus()
 end)
 
--- FLOATING BUTTON: ALWAYS VISIBLE
+--==================================================
+-- FLOATING MENU
+--==================================================
+
 local Toggle = Instance.new("TextButton")
 Toggle.Size = UDim2.fromOffset(65, 52)
-Toggle.Position = UDim2.new(0, 18, 0.48, 0)
+Toggle.Position = UDim2.new(0, 15, 0.45, 0)
 Toggle.BackgroundColor3 = BLUE
 Toggle.Text = "FPS"
 Toggle.TextColor3 = WHITE
-Toggle.TextSize = 17
 Toggle.Font = Enum.Font.GothamBold
+Toggle.TextSize = 17
 Toggle.Active = true
+Toggle.Draggable = true
 Toggle.Parent = GUI
-Toggle.ZIndex = 10
-Corner(Toggle, 12)
+Round(Toggle)
 
 Toggle.Activated:Connect(function()
     Main.Visible = not Main.Visible
@@ -361,38 +622,42 @@ Close.Activated:Connect(function()
     Main.Visible = false
 end)
 
+--==================================================
 -- FPS COUNTER
+--==================================================
+
 local Counter = Instance.new("TextLabel")
 Counter.Size = UDim2.fromOffset(115, 28)
 Counter.Position = UDim2.new(1, -125, 1, -40)
 Counter.BackgroundColor3 = BG
-Counter.TextColor3 = Color3.fromRGB(80, 255, 120)
+Counter.TextColor3 = GREEN
+Counter.Text = "FPS: --"
 Counter.Font = Enum.Font.GothamBold
 Counter.TextSize = 14
-Counter.Text = "FPS: --"
 Counter.Parent = GUI
-Corner(Counter, 7)
+Round(Counter)
 
 local Frames = 0
 local Last = os.clock()
 
-Connections[#Connections + 1] =
-    RunService.RenderStepped:Connect(function()
-        Frames += 1
+RunService.RenderStepped:Connect(function()
+    Frames += 1
 
-        local now = os.clock()
+    local now = os.clock()
 
-        if now - Last >= 1 then
-            Counter.Text = "FPS: " ..
-                math.floor(Frames / (now - Last))
+    if now - Last >= 1 then
+        Counter.Text = "FPS: " ..
+            math.floor(Frames / (now - Last))
 
-            Frames = 0
-            Last = now
-        end
-    end)
+        Frames = 0
+        Last = now
+    end
+end)
 
--- Initial state
+-- INITIAL
 Main.Visible = false
+UpdateStatus()
 
-print("DRAGON FPS BOOSTER V3 LOADED")
-print("Tap FPS button to open menu.")
+print("DRAGON FPS BOOSTER V6 LOADED")
+print("8 custom switches ready")
+print("Tap FPS to open menu")
