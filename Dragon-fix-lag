@@ -1,7 +1,7 @@
 --==================================================
--- DRAGON FPS BOOSTER V7 - ULTIMATE CLIENT EDITION
+-- DRAGON FPS BOOSTER V7.1 - ULTIMATE CLIENT EDITION
 -- Mobile / Executor / 6 Presets / 8 Toggles
--- Incremental Update + Weak Cache + UI Sync
+-- Fixed Menu Toggle + Incremental Update + Weak Cache
 --==================================================
 
 local Players = game:GetService("Players")
@@ -14,13 +14,11 @@ local LocalPlayer = Players.LocalPlayer or Players.PlayerAdded:Wait()
 
 -- CLEAN OLD GUI
 for _, parent in ipairs({CoreGui, LocalPlayer:WaitForChild("PlayerGui")}) do
-    local old = parent:FindFirstChild("DragonFPS_V7")
-    if old then
-        old:Destroy()
-    end
-    local oldV6 = parent:FindFirstChild("DragonFPS_V6")
-    if oldV6 then
-        oldV6:Destroy()
+    for _, name in ipairs({"DragonFPS_V7", "DragonFPS_V6"}) do
+        local old = parent:FindFirstChild(name)
+        if old then
+            old:Destroy()
+        end
     end
 end
 
@@ -95,8 +93,9 @@ local function RememberAndSet(obj, prop, value)
         record[prop] = currentVal
     end
 
-    -- Gán trực tiếp cho tốc độ cao; chỉ dùng pcall khi cần
-    obj[prop] = value
+    pcall(function()
+        obj[prop] = value
+    end)
 end
 
 local function RestoreSingleFeature(featureName)
@@ -104,54 +103,54 @@ local function RestoreSingleFeature(featureName)
         if typeof(obj) == "Instance" and obj.Parent then
             if featureName == "Particles" then
                 if record.Enabled ~= nil and (obj:IsA("ParticleEmitter") or obj:IsA("Fire") or obj:IsA("Smoke") or obj:IsA("Sparkles")) then
-                    obj.Enabled = record.Enabled
+                    pcall(function() obj.Enabled = record.Enabled end)
                     record.Enabled = nil
                 end
             elseif featureName == "Trails" then
                 if record.Enabled ~= nil and (obj:IsA("Trail") or obj:IsA("Beam")) then
-                    obj.Enabled = record.Enabled
+                    pcall(function() obj.Enabled = record.Enabled end)
                     record.Enabled = nil
                 end
             elseif featureName == "PostFX" then
                 if record.Enabled ~= nil and obj:IsA("PostEffect") then
-                    obj.Enabled = record.Enabled
+                    pcall(function() obj.Enabled = record.Enabled end)
                     record.Enabled = nil
                 end
                 if obj:IsA("Atmosphere") then
-                    if record.Density ~= nil then obj.Density = record.Density; record.Density = nil end
-                    if record.Haze ~= nil then obj.Haze = record.Haze; record.Haze = nil end
-                    if record.Glare ~= nil then obj.Glare = record.Glare; record.Glare = nil end
+                    if record.Density ~= nil then pcall(function() obj.Density = record.Density end); record.Density = nil end
+                    if record.Haze ~= nil then pcall(function() obj.Haze = record.Haze end); record.Haze = nil end
+                    if record.Glare ~= nil then pcall(function() obj.Glare = record.Glare end); record.Glare = nil end
                 end
             elseif featureName == "Lighting" then
                 if record.Enabled ~= nil and (obj:IsA("PointLight") or obj:IsA("SpotLight") or obj:IsA("SurfaceLight")) then
-                    obj.Enabled = record.Enabled
+                    pcall(function() obj.Enabled = record.Enabled end)
                     record.Enabled = nil
                 end
                 if obj == Lighting then
-                    if record.EnvironmentDiffuseScale ~= nil then Lighting.EnvironmentDiffuseScale = record.EnvironmentDiffuseScale; record.EnvironmentDiffuseScale = nil end
-                    if record.EnvironmentSpecularScale ~= nil then Lighting.EnvironmentSpecularScale = record.EnvironmentSpecularScale; record.EnvironmentSpecularScale = nil end
+                    if record.EnvironmentDiffuseScale ~= nil then pcall(function() Lighting.EnvironmentDiffuseScale = record.EnvironmentDiffuseScale end); record.EnvironmentDiffuseScale = nil end
+                    if record.EnvironmentSpecularScale ~= nil then pcall(function() Lighting.EnvironmentSpecularScale = record.EnvironmentSpecularScale end); record.EnvironmentSpecularScale = nil end
                 end
             elseif featureName == "Materials" and obj:IsA("BasePart") then
-                if record.Material ~= nil then obj.Material = record.Material; record.Material = nil end
-                if record.Reflectance ~= nil then obj.Reflectance = record.Reflectance; record.Reflectance = nil end
+                if record.Material ~= nil then pcall(function() obj.Material = record.Material end); record.Material = nil end
+                if record.Reflectance ~= nil then pcall(function() obj.Reflectance = record.Reflectance end); record.Reflectance = nil end
             elseif featureName == "Textures" and (obj:IsA("Decal") or obj:IsA("Texture")) then
-                if record.Transparency ~= nil then obj.Transparency = record.Transparency; record.Transparency = nil end
+                if record.Transparency ~= nil then pcall(function() obj.Transparency = record.Transparency end); record.Transparency = nil end
             elseif featureName == "HideMap" then
                 if obj:IsA("BasePart") and record.LocalTransparencyModifier ~= nil then
-                    obj.LocalTransparencyModifier = record.LocalTransparencyModifier
+                    pcall(function() obj.LocalTransparencyModifier = record.LocalTransparencyModifier end)
                     record.LocalTransparencyModifier = nil
                 end
                 if obj:IsA("Terrain") and record.Decoration ~= nil then
-                    obj.Decoration = record.Decoration
+                    pcall(function() obj.Decoration = record.Decoration end)
                     record.Decoration = nil
                 end
             elseif featureName == "Shadows" then
                 if obj:IsA("BasePart") and record.CastShadow ~= nil then
-                    obj.CastShadow = record.CastShadow
+                    pcall(function() obj.CastShadow = record.CastShadow end)
                     record.CastShadow = nil
                 end
                 if obj == Lighting and record.GlobalShadows ~= nil then
-                    Lighting.GlobalShadows = record.GlobalShadows
+                    pcall(function() Lighting.GlobalShadows = record.GlobalShadows end)
                     record.GlobalShadows = nil
                 end
             end
@@ -298,6 +297,7 @@ local function ScanDescendantsAsync(targetFeature, token)
 
     for i = 1, #descendants do
         if not Enabled or token ~= RunToken then
+            IsApplying = false
             return
         end
 
@@ -310,24 +310,24 @@ local function ScanDescendantsAsync(targetFeature, token)
 
     for _, obj in ipairs(Lighting:GetDescendants()) do
         if not Enabled or token ~= RunToken then
+            IsApplying = false
             return
         end
         OptimizeInstance(obj, targetFeature)
     end
+
+    IsApplying = false
 end
 
 local function ApplyBoost(targetFeature)
-    if IsApplying then return end
-    IsApplying = true
-
     RunToken += 1
     local token = RunToken
+    IsApplying = true
     Enabled = true
 
     ApplyGlobalSettings()
     task.spawn(function()
         ScanDescendantsAsync(targetFeature, token)
-        IsApplying = false
     end)
 end
 
@@ -365,11 +365,11 @@ local connWorkspace = HookContainer(Workspace)
 local connLighting = HookContainer(Lighting)
 
 --==================================================
--- 6 PRESETS (TĂNG DẦN ĐỘ TỐI ƯU)
+-- 6 PRESETS
 --==================================================
 
 local Presets = {
-    [1] = { -- Smooth Basic
+    [1] = {
         Particles = true,
         Trails = false,
         PostFX = false,
@@ -379,7 +379,7 @@ local Presets = {
         HideMap = false,
         Shadows = true
     },
-    [2] = { -- Balanced FPS
+    [2] = {
         Particles = true,
         Trails = true,
         PostFX = true,
@@ -389,7 +389,7 @@ local Presets = {
         HideMap = false,
         Shadows = true
     },
-    [3] = { -- Performance
+    [3] = {
         Particles = true,
         Trails = true,
         PostFX = true,
@@ -399,7 +399,7 @@ local Presets = {
         HideMap = false,
         Shadows = true
     },
-    [4] = { -- High FPS
+    [4] = {
         Particles = true,
         Trails = true,
         PostFX = true,
@@ -409,7 +409,7 @@ local Presets = {
         HideMap = false,
         Shadows = true
     },
-    [5] = { -- Extreme Boost
+    [5] = {
         Particles = true,
         Trails = true,
         PostFX = true,
@@ -419,7 +419,7 @@ local Presets = {
         HideMap = false,
         Shadows = true
     },
-    [6] = { -- Empty Map (Max FPS)
+    [6] = {
         Particles = true,
         Trails = true,
         PostFX = true,
@@ -452,8 +452,7 @@ end
 local ScreenGui = Instance.new("ScreenGui")
 ScreenGui.Name = "DragonFPS_V7"
 ScreenGui.ResetOnSpawn = false
-ScreenGui.IgnoreGuiInset = true
-ScreenGui.DisplayOrder = 100000
+ScreenGui.DisplayOrder = 999
 
 local okParent = pcall(function()
     ScreenGui.Parent = CoreGui
@@ -464,12 +463,11 @@ end
 
 local Main = Instance.new("Frame")
 Main.Name = "MainFrame"
-Main.Size = UDim2.fromOffset(300, 440)
-Main.Position = UDim2.new(0.5, -150, 0.5, -220)
+Main.Size = UDim2.fromOffset(290, 410)
+Main.Position = UDim2.new(0.5, -145, 0.5, -205)
 Main.BackgroundColor3 = BG
 Main.BorderSizePixel = 0
-Main.Active = true
-Main.Draggable = true
+Main.ZIndex = 5
 Main.Visible = false
 Main.Parent = ScreenGui
 AddCorner(Main, 10)
@@ -483,6 +481,7 @@ local Header = Instance.new("Frame")
 Header.Size = UDim2.new(1, 0, 0, 42)
 Header.BackgroundColor3 = PANEL
 Header.BorderSizePixel = 0
+Header.ZIndex = 6
 Header.Parent = Main
 AddCorner(Header, 10)
 
@@ -490,11 +489,12 @@ local Title = Instance.new("TextLabel")
 Title.Size = UDim2.new(1, -86, 1, 0)
 Title.Position = UDim2.fromOffset(12, 0)
 Title.BackgroundTransparency = 1
-Title.Text = "DRAGON FPS V7"
+Title.Text = "DRAGON FPS V7.1"
 Title.TextXAlignment = Enum.TextXAlignment.Left
 Title.TextColor3 = WHITE
 Title.Font = Enum.Font.GothamBold
 Title.TextSize = 15
+Title.ZIndex = 7
 Title.Parent = Header
 
 local function MakeHeaderBtn(text, offsetX, color)
@@ -506,6 +506,7 @@ local function MakeHeaderBtn(text, offsetX, color)
     btn.TextColor3 = WHITE
     btn.Font = Enum.Font.GothamBold
     btn.TextSize = 14
+    btn.ZIndex = 7
     btn.Parent = Header
     AddCorner(btn, 7)
     return btn
@@ -522,6 +523,7 @@ Scroll.BorderSizePixel = 0
 Scroll.ScrollBarThickness = 4
 Scroll.AutomaticCanvasSize = Enum.AutomaticSize.Y
 Scroll.CanvasSize = UDim2.fromOffset(0, 0)
+Scroll.ZIndex = 6
 Scroll.Parent = Main
 
 local ListLayout = Instance.new("UIListLayout")
@@ -538,6 +540,7 @@ StatusLabel.Font = Enum.Font.GothamBold
 StatusLabel.TextSize = 11
 StatusLabel.TextXAlignment = Enum.TextXAlignment.Left
 StatusLabel.Text = "STATUS: OFF"
+StatusLabel.ZIndex = 6
 StatusLabel.Parent = Main
 
 local function CreateActionButton(text, color, order, onClick)
@@ -549,9 +552,18 @@ local function CreateActionButton(text, color, order, onClick)
     btn.Font = Enum.Font.GothamBold
     btn.TextSize = 12
     btn.LayoutOrder = order
+    btn.ZIndex = 7
     btn.Parent = Scroll
     AddCorner(btn, 8)
     btn.Activated:Connect(onClick)
+    btn.MouseButton1Click:Connect(function()
+        if not btn:GetAttribute("_Handled") then
+            btn:SetAttribute("_Handled", true)
+            task.delay(0.05, function()
+                if btn then btn:SetAttribute("_Handled", nil) end
+            end)
+        end
+    end)
     return btn
 end
 
@@ -609,7 +621,6 @@ local function ApplyPreset(level)
         Features[k] = v
     end
 
-    -- Khôi phục các feature bị tắt so với trạng thái cũ rồi quét lại những feature đang bật
     for _, name in ipairs(FeatureOrder) do
         if not Features[name] then
             RestoreSingleFeature(name)
@@ -620,7 +631,6 @@ local function ApplyPreset(level)
     RefreshUI()
 end
 
--- Build Preset Buttons (Order 1..6)
 local PresetNames = {
     [1] = "LEVEL 1 - SMOOTH BASIC",
     [2] = "LEVEL 2 - BALANCED FPS",
@@ -636,7 +646,6 @@ for lvl = 1, 6 do
     end)
 end
 
--- Build 8 Feature Toggles (Order 11..18)
 for idx, name in ipairs(FeatureOrder) do
     FeatureButtons[name] = CreateActionButton(FeatureLabels[name], RED, 10 + idx, function()
         ToggleFeature(name)
@@ -644,7 +653,6 @@ for idx, name in ipairs(FeatureOrder) do
     end)
 end
 
--- Master Toggle & Restore All (Order 20..21)
 MasterButton = CreateActionButton("MASTER BOOST: OFF", RED, 20, function()
     if Enabled then
         RestoreAll()
@@ -659,30 +667,48 @@ CreateActionButton("RESTORE ALL GRAPHICS", AMBER, 21, function()
     RefreshUI()
 end)
 
--- Floating Button & Window Controls
+-- Floating Toggle Button (Không bật Draggable để bấm mở menu luôn ăn)
 local FloatingBtn = Instance.new("TextButton")
 FloatingBtn.Name = "FPS_Toggle"
-FloatingBtn.Size = UDim2.fromOffset(64, 48)
-FloatingBtn.Position = UDim2.new(0, 14, 0.45, 0)
+FloatingBtn.Size = UDim2.fromOffset(68, 50)
+FloatingBtn.Position = UDim2.new(0, 16, 0.45, 0)
 FloatingBtn.BackgroundColor3 = BLUE
 FloatingBtn.Text = "FPS"
 FloatingBtn.TextColor3 = WHITE
 FloatingBtn.Font = Enum.Font.GothamBold
-FloatingBtn.TextSize = 16
-FloatingBtn.Active = true
-FloatingBtn.Draggable = true
+FloatingBtn.TextSize = 17
+FloatingBtn.ZIndex = 20
 FloatingBtn.Parent = ScreenGui
 AddCorner(FloatingBtn, 10)
 
-FloatingBtn.Activated:Connect(function()
+local function ToggleMenuState()
     Main.Visible = not Main.Visible
+end
+
+FloatingBtn.Activated:Connect(ToggleMenuState)
+FloatingBtn.MouseButton1Click:Connect(function()
+    if not FloatingBtn:GetAttribute("_Toggled") then
+        FloatingBtn:SetAttribute("_Toggled", true)
+        ToggleMenuState()
+        task.delay(0.1, function()
+            if FloatingBtn then
+                FloatingBtn:SetAttribute("_Toggled", nil)
+            end
+        end)
+    end
 end)
 
 MinBtn.Activated:Connect(function()
     Main.Visible = false
 end)
+MinBtn.MouseButton1Click:Connect(function()
+    Main.Visible = false
+end)
 
 CloseBtn.Activated:Connect(function()
+    Main.Visible = false
+end)
+CloseBtn.MouseButton1Click:Connect(function()
     Main.Visible = false
 end)
 
@@ -696,6 +722,7 @@ Counter.TextColor3 = GREEN
 Counter.Text = "FPS: --"
 Counter.Font = Enum.Font.GothamBold
 Counter.TextSize = 13
+Counter.ZIndex = 15
 Counter.Parent = ScreenGui
 AddCorner(Counter, 8)
 
@@ -721,7 +748,6 @@ local connRender = RunService.RenderStepped:Connect(function()
     end
 end)
 
--- Cleanup khi LocalPlayer rời đi
 LocalPlayer.AncestryChanged:Connect(function(_, parent)
     if not parent then
         RestoreAll()
@@ -733,4 +759,4 @@ LocalPlayer.AncestryChanged:Connect(function(_, parent)
 end)
 
 RefreshUI()
-print("[DRAGON FPS V7] Ready | Incremental boost + UI sync enabled.")
+print("[DRAGON FPS V7.1] Loaded | Tap FPS button to open menu.")
