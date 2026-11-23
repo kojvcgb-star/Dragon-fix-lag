@@ -1,0 +1,148 @@
+
+--[[
+    BLOX FRUITS FPS BOOSTER V1
+    6 Optimization Levels
+    Client-side graphics optimization
+]]
+
+local Players = game:GetService("Players")
+local Lighting = game:GetService("Lighting")
+local RunService = game:GetService("RunService")
+local Workspace = game:GetService("Workspace")
+
+local Player = Players.LocalPlayer
+
+-- Save original settings
+local Original = {
+    GlobalShadows = Lighting.GlobalShadows,
+    FogEnd = Lighting.FogEnd,
+    Brightness = Lighting.Brightness,
+    Quality = settings().Rendering.QualityLevel
+}
+
+local CurrentLevel = 0
+local Enabled = false
+
+-- GUI
+local Gui = Instance.new("ScreenGui")
+Gui.Name = "FPSBooster"
+Gui.ResetOnSpawn = false
+
+pcall(function()
+    Gui.Parent = game:GetService("CoreGui")
+end)
+
+if not Gui.Parent then
+    Gui.Parent = Player:WaitForChild("PlayerGui")
+end
+
+local Frame = Instance.new("Frame", Gui)
+Frame.Size = UDim2.fromOffset(250, 340)
+Frame.Position = UDim2.new(0.5, -125, 0.3, 0)
+Frame.BackgroundColor3 = Color3.fromRGB(20, 22, 30)
+Frame.BorderSizePixel = 0
+
+local Corner = Instance.new("UICorner", Frame)
+Corner.CornerRadius = UDim.new(0, 12)
+
+local Title = Instance.new("TextLabel", Frame)
+Title.Size = UDim2.new(1, 0, 0, 42)
+Title.BackgroundTransparency = 1
+Title.Text = "FPS BOOSTER 6 LEVELS"
+Title.TextColor3 = Color3.new(1,1,1)
+Title.TextSize = 17
+Title.Font = Enum.Font.GothamBold
+
+local function MakeButton(name, y, callback)
+    local B = Instance.new("TextButton", Frame)
+    B.Size = UDim2.new(0.85, 0, 0, 34)
+    B.Position = UDim2.new(0.075, 0, 0, y)
+    B.BackgroundColor3 = Color3.fromRGB(45, 75, 120)
+    B.TextColor3 = Color3.new(1,1,1)
+    B.TextSize = 13
+    B.Font = Enum.Font.GothamBold
+    B.Text = name
+
+    Instance.new("UICorner", B).CornerRadius = UDim.new(0, 7)
+    B.MouseButton1Click:Connect(callback)
+    return B
+end
+
+local function Optimize(level)
+    CurrentLevel = level
+    Enabled = true
+
+    Lighting.GlobalShadows = false
+    Lighting.FogEnd = 100000
+    settings().Rendering.QualityLevel = Enum.QualityLevel.Level01
+
+    local terrain = Workspace:FindFirstChildOfClass("Terrain")
+
+    if terrain then
+        pcall(function()
+            terrain.Decoration = false
+        end)
+    end
+
+    for _, obj in ipairs(Workspace:GetDescendants()) do
+        if obj:IsA("ParticleEmitter") then
+            obj.Enabled = level < 2
+        elseif obj:IsA("Trail") or obj:IsA("Beam") then
+            obj.Enabled = level < 3
+        elseif obj:IsA("PostEffect") then
+            obj.Enabled = level < 4
+        elseif obj:IsA("BasePart") then
+            if level >= 5 then
+                obj.CastShadow = false
+            end
+        end
+    end
+
+    print("FPS Booster Level:", level)
+end
+
+local function Restore()
+    Enabled = false
+    CurrentLevel = 0
+
+    Lighting.GlobalShadows = Original.GlobalShadows
+    Lighting.FogEnd = Original.FogEnd
+    Lighting.Brightness = Original.Brightness
+
+    settings().Rendering.QualityLevel = Original.Quality
+
+    print("Graphics settings restored. Rejoin if some effects remain disabled.")
+end
+
+for i = 1, 6 do
+    MakeButton("LEVEL " .. i, 45 + i * 39, function()
+        Optimize(i)
+    end)
+end
+
+MakeButton("RESTORE GRAPHICS", 285, Restore)
+
+-- FPS display
+local FPS = Instance.new("TextLabel", Frame)
+FPS.Size = UDim2.new(1, 0, 0, 22)
+FPS.Position = UDim2.new(0, 0, 1, -24)
+FPS.BackgroundTransparency = 1
+FPS.TextColor3 = Color3.fromRGB(100,255,130)
+FPS.TextSize = 13
+FPS.Font = Enum.Font.GothamBold
+
+local frames = 0
+local last = os.clock()
+
+RunService.RenderStepped:Connect(function()
+    frames += 1
+    local now = os.clock()
+
+    if now - last >= 1 then
+        FPS.Text = "FPS: " .. math.floor(frames / (now - last))
+        frames = 0
+        last = now
+    end
+end)
+
+print("Blox Fruits FPS Booster loaded!")
